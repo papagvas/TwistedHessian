@@ -132,6 +132,24 @@ void nu(struct PointProjective* weierPoint, mp_int* d, mp_int* p, mp_int* res) {
   mp_mulmod(&temp8, &temp2, p, res);
 }
 
+int isOnCurve(struct PointProjective* hessePoint, mp_int* a, mp_int* d, mp_int* p) {
+  mp_int temp1, temp2, temp3, temp4, three, zero;
+  mp_init_multi(&temp1, &temp2, &temp3, &temp4, &three, &zero, NULL);
+  mp_read_radix(&zero, "0", 10);
+  mp_read_radix(&three, "3", 10);
+  mp_exptmod(hessePoint->x, &three, p, &temp1);
+  mp_mulmod(&temp1, a, p, &temp1); // aX^3
+  mp_exptmod(hessePoint->y, &three, p, &temp3);
+  mp_addmod(&temp1, &temp3, p, &temp1); // aX^3 + Y^3
+  mp_exptmod(hessePoint->z, &three, p, &temp4);
+  mp_addmod(&temp1, &temp4 , p, &temp1); // aX^3 + Y^3 + Z^3
+  mp_mulmod(hessePoint->x, hessePoint->y, p, &temp2); // x*y
+  mp_mulmod(hessePoint->z, &temp2, p, &temp2); // x*y*z
+  mp_mulmod(d, &temp2, p, &temp2); // d * x * y * z
+  mp_submod(&temp1, &temp2, p, &temp1); 
+  return mp_cmp_mag(&temp1, &zero) == MP_EQ;
+}
+
 void transformPoint(struct PointProjective* weierPoint, mp_int* nu, mp_int* d, mp_int* p, struct PointProjective* hesse) {
   mp_int nine, three, d_cubed, one, two, twelve, temp1, temp2;
   mp_init_multi(&nine, &three, &one, &two, &twelve, &d_cubed, &temp1, &temp2, NULL);
@@ -309,11 +327,11 @@ void montgomeryLadder(struct PointProjective* point, mp_int* k, mp_int* a, mp_in
 }
 
 int main() {
-  mp_int three, p, neg_a, b, d, n, x, y, z, x1, y1, z1, m; //Weierstrass params
-  mp_init_multi(&p, &neg_a, &b, &d, &n, &x, &y, &z, &x1, &y1, &z1, &m, &three, NULL); //Initialize them
+  mp_int three, p, neg_a, b, d, n, x, y, z, x1, y1, z1, m, test, d_hesse; //Weierstrass params
+  mp_init_multi(&p, &neg_a, &b, &d, &n, &x, &y, &z, &x1, &y1, &z1, &m, &three, &test, &d_hesse, NULL); //Initialize them
   mp_read_radix(&p, "115792089237316195423570985008687907853269984665640564039457584007913111864739", 10); 
   mp_read_radix(&b, "9774",10);
-  mp_read_radix(&neg_a, "2835",10);
+  mp_read_radix(&neg_a, "2835",10); // -a
   
   convertToHesse(&p, &neg_a, &b, &d);
   mp_print(&d, "d");
@@ -326,6 +344,7 @@ int main() {
   point.y = &y;
   point.z = &z;
   nu(&point, &d, &p, &n);
+  mp_print(&n, "nu"); 
   
   struct PointProjective hesse;
   hesse.x = &x1;
@@ -334,15 +353,23 @@ int main() {
  
   transformPoint(&point, &n, &d, &p, &hesse); // transform to hessian form
   printPoint(&hesse, "hessian projective coordinates");
+  printf("%s\n", "affine coordinates");
   printAffine(&hesse, &p);
-  mp_int idx, idy, idz, one, resx, resy, resz;
-  mp_init_multi(&idx, &idy, &idz, &one, &resx, &resy, &resz, NULL);
+ 
+  mp_read_radix(&three, "3", 10);
+  mp_mulmod(&d, &three, &p, &d_hesse);
+ 
+  mp_int idx, idy, idz, one, resx, resy, resz, test1, test2, test3, negx, negy, k1, k2, k3;
+  mp_init_multi(&idx, &idy, &idz, &one, &resx, &resy, &resz, &test1, &test2, &test3, &negx, &negy, &k1, &k2, &k3, NULL);
   
   mp_read_radix(&one, "1", 10);
   mp_read_radix(&idx, "0", 10);
   mp_read_radix(&idy, "1", 10);
   mp_read_radix(&idz, "1", 10);
   myNeg(&idy, &p, &idy);
+  
+  if (isOnCurve(&hesse, &one, &d_hesse, &p))
+    printf("%s\n", "Point is on the curve!");
   
   struct PointProjective id;
   id.x = &idx;
@@ -353,22 +380,51 @@ int main() {
   res.x = &resx;
   res.y = &resy;
   res.z = &resz;
-  
- // sum(&id, &hesse, &one, &p, &res);
-//  printAffine(&res, &p);
+ 
+  struct PointProjective testt;
+  testt.x = &test1;
+  testt.y = &test2;
+  testt.z = &test3;
+
+  transformPoint(&point, &n, &d, &p, &testt);
   mp_read_radix(&m, "115792089237316195423570985008687907852907080286716537199505774922796921406320", 10);
-//  mp_read_radix(&m, "10", 10);
-/*  unsigned char buf[mp_ubin_size(&m)];
-  mp_to_unsigned_bin(&m, buf);    
-  for (int i = strlen(buf); i >= 0; i--) {
-    if (mp_get_bit(&m, i) == MP_YES)
-      printf("%s", "1");
-    else 
-      printf("%s", "0");
-  }*/
+  printf("\n%s\n", "test2, mP = id");
   montgomeryLadder(&hesse, &m, &one, &p, &res);
-  printf("%s\n", "what");
-//  standardSum(&id, &hesse, &p, &res);
+  printAffine(&res, &p);
+  
+  printf("%s\n", "test3.1 [m+1]P = P");
+  mp_addmod(&m, &one, &p, &m);
+  montgomeryLadder(&testt, &m, &one, &p, &res);
+  printAffine(&res, &p);
+
+  transformPoint(&point, &n, &d, &p, &testt);
+  printf("%s\n", "test3.2 [m-1]P = -P");
+  printf("%s\n", "-p = (-x/y, 1/y)");
+  mp_invmod(testt.y, &p, &negy);
+  mp_mulmod(testt.x, &negy, &p, &negx);
+  mp_print(&negx, "x of -P is");
+  mp_print(&negy, "y of -P is");
+  mp_submod(&m, &one, &p, &m);
+  mp_submod(&m, &one, &p, &m); // m - 1
+  montgomeryLadder(&testt, &m, &one, &p, &res);
+  printAffine(&res, &p);
+  printf("%s\n", "test 4 k1P + k2P = [k1+k2]P"); 
+  mp_rand(&k1, 2);
+  mp_rand(&k2, 2);
+  mp_addmod(&k1, &k2, &p, &k3);
+  transformPoint(&point, &n, &d, &p, &testt);
+  transformPoint(&point, &n, &d, &p, &hesse);
+  mp_addmod(&m, &one, &p, &m);
+  mp_print(&k1, "k1");
+  mp_print(&k2, "k2");
+  montgomeryLadder(&hesse, &k1, &one, &p, &res); // res = k1P
+  montgomeryLadder(&testt, &k2, &one, &p, &hesse); // hesse = k2P
+  standardSum(&res, &hesse, &p, &id); // id = k1P + k2P
+  printf("%s\n", "k1P + k2P");
+  printAffine(&id, &p);
+  transformPoint(&point, &n, &d, &p, &testt);
+  montgomeryLadder(&testt, &k3, &one, &p, &res);
+  printf("%s\n", "[k1+k2]P");
   printAffine(&res, &p);
   return 0;
 }
